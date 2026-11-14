@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="680" viewBox="0 0 1600 680">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b0c10"/><stop offset="1" stop-color="#241015"/></linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c8102e"/><stop offset="1" stop-color="#ff5365"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1600" height="680" rx="28" fill="url(#bg)"/>
+  <path d="M80 575H1520M80 105H1520" stroke="#3d2026" stroke-width="2"/>
+  <text x="90" y="95" fill="#fff" font-size="38" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif" font-weight="700">汇芯 · Antigravity 中文界面解决方案</text>
+  <text x="90" y="140" fill="#c8bfc1" font-size="22" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">从官方副本备份，到界面翻译，再到完整可回滚</text>
+  <g font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">
+    <g transform="translate(90 220)"><rect width="300" height="230" rx="22" fill="#171a20" stroke="#66636a" stroke-width="2"/><circle cx="28" cy="30" r="7" fill="#ed5b64"/><circle cx="52" cy="30" r="7" fill="#d3a64d"/><circle cx="76" cy="30" r="7" fill="#42b883"/><text x="30" y="88" fill="#fff" font-size="25" font-weight="700">1 · 官方应用</text><text x="30" y="132" fill="#b7b1b4" font-size="20">app.asar</text><text x="30" y="170" fill="#b7b1b4" font-size="20">原始文件保持备份</text></g>
+    <g transform="translate(500 220)"><rect width="300" height="230" rx="22" fill="#24161b" stroke="#c8102e" stroke-width="3" filter="url(#glow)"/><text x="30" y="88" fill="#fff" font-size="25" font-weight="700">2 · 汇芯翻译层</text><text x="30" y="132" fill="#ffb6bd" font-size="20">侧栏 · 设置 · 权限</text><text x="30" y="170" fill="#ffb6bd" font-size="20">对话摘要 · 菜单</text></g>
+    <g transform="translate(910 220)"><rect width="300" height="230" rx="22" fill="#171a20" stroke="#66636a" stroke-width="2"/><text x="30" y="88" fill="#fff" font-size="25" font-weight="700">3 · 中文界面</text><text x="30" y="132" fill="#b7b1b4" font-size="20">用户看得懂</text><text x="30" y="170" fill="#b7b1b4" font-size="20">模型与正文不误翻</text></g>
+    <g transform="translate(1320 220)"><rect width="190" height="230" rx="22" fill="#171a20" stroke="#66636a" stroke-width="2"/><text x="28" y="88" fill="#fff" font-size="25" font-weight="700">4 · 还原</text><text x="28" y="132" fill="#b7b1b4" font-size="20">restore</text><text x="28" y="170" fill="#b7b1b4" font-size="20">一键回到英文</text></g>
+  </g>
+  <g stroke="#ff5365" stroke-width="5" fill="none" stroke-linecap="round"><path d="M400 335h75"/><path d="M810 335h75"/><path d="M1220 335h75"/></g>
+  <g fill="#ff5365"><path d="m465 323 22 12-22 12z"/><path d="m875 323 22 12-22 12z"/><path d="m1285 323 22 12-22 12z"/></g>
+  <text x="90" y="540" fill="#ffb6bd" font-size="24" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">安全原则：先备份 · 再注入 · 可检查 · 可还原</text>
+  <text x="90" y="610" fill="#8d8588" font-size="20" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif">袁六伟 · 台州汇芯（公众号/视频号：袁六伟）</text>
+</svg>
