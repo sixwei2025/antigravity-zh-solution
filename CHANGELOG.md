@@ -1,0 +1,10 @@
+# 更新记录
+
+## v0.1.0 — 2026-11-14
+
+- 首次整理为可发布的 macOS Antigravity 中文界面解决方案。
+- 支持 `check`、`install`、`restore` 三个命令。
+- 支持 `app.asar.unpacked` 文件的安全解包与还原。
+- 增加侧栏、设置、输入提示、对话摘要、权限选项和应用菜单翻译。
+- 保留原始 `app.asar` 备份，避免重复安装覆盖官方文件。
+- 已验证 Antigravity 2.32.1、Apple Silicon 结构。
