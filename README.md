@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/showcase/hero-banner.jpg" alt="Antigravity 汉化前后真实界面对比" width="100%" />
+<img src="assets/showcase/hero-banner-v2.jpg" alt="Antigravity 汉化前后真实界面对比" width="100%" />
 
 # 汇芯·Antigravity 中文界面解决方案
 
@@ -59,7 +59,7 @@ python3 antigravity_zh_switcher.py restore
 
 ## 工作原理
 
-<img src="assets/showcase/pipeline-architecture.jpg" alt="Antigravity 中文适配工作原理" width="100%" />
+<img src="assets/showcase/pipeline-architecture-v2.jpg" alt="Antigravity 中文适配工作原理" width="100%" />
 
 整个过程只处理本机应用的显示资源：先检查版本与文件结构，再保留官方 `app.asar` 备份，向副本注入界面翻译层，最后由 Electron 加载解包目录。还原时删除适配副本并恢复备份，不改动账号、对话数据、模型能力、网络设置或官方服务。
 
@@ -102,9 +102,8 @@ python3 antigravity_zh_switcher.py restore
 ```text
 antigravity-zh-solution/
 ├── antigravity_zh_switcher.py      # 检查、安装、还原
-├── assets/showcase/hero-banner.jpg # 汉化前后真实界面对比
-├── assets/showcase/pipeline-architecture.jpg
-├── assets/showcase/pipeline-architecture.svg
+├── assets/showcase/hero-banner-v2.jpg # 汉化前后真实界面对比
+├── assets/showcase/pipeline-architecture-v2.jpg
 ├── CHANGELOG.md
 ├── LICENSE
 └── README.md
