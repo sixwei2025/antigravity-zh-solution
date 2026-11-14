@@ -69,6 +69,13 @@ TRANSLATIONS = {
     "New Window": "新建窗口", "Quit": "退出", "Check for Updates": "检查更新",
 }
 
+CONVERSATION_TITLES = {
+    "Gemini Hydrogen Promo Video Creation": "Gemini Hydrogen 宣传视频制作",
+    "Redesigning Company Official Website": "公司官网改版设计",
+    "Local Video Promotional Style Review": "本地视频宣传风格评审",
+    "Language Setting Location": "语言设置位置",
+}
+
 
 def version_tuple(value: str) -> tuple[int, int, int]:
     parts = (value.split(".") + ["0", "0", "0"])[:3]
@@ -147,10 +154,12 @@ def js_string(value: str) -> str:
 
 def make_injection() -> str:
     dictionary = json.dumps(TRANSLATIONS, ensure_ascii=False, separators=(",", ":"))
+    title_dictionary = json.dumps(CONVERSATION_TITLES, ensure_ascii=False, separators=(",", ":"))
     return f"""
 /* {MARKER} */
 (function () {{
   const DICT = {dictionary};
+  const TITLE_DICT = {title_dictionary};
   const SKIP = new Set(['INPUT','TEXTAREA','PRE','CODE','SCRIPT','STYLE']);
   const translate = (text) => {{
     if (!text || !text.trim()) return text;
@@ -160,17 +169,38 @@ def make_injection() -> str:
     }});
     return value;
   }};
+  const replaceTitleText = (node, title, replacement) => {{
+    Array.from(node.childNodes || []).forEach((child) => {{
+      if (child.nodeType === 3) {{
+        child.nodeValue = child.nodeValue.replace(title, replacement);
+      }} else if (child.nodeType === 1) {{
+        replaceTitleText(child, title, replacement);
+      }}
+    }});
+  }};
   const visit = (node) => {{
     if (!node || (node.nodeType === 1 && SKIP.has(node.tagName))) return;
     if (node.nodeType === 3) {{
       const raw = node.nodeValue || '';
-      const next = raw.trim() === 'Local' ? raw.replace('Local', '本地') : translate(raw);
+      const exactTitle = TITLE_DICT[raw.trim()];
+      const next = exactTitle ? raw.replace(raw.trim(), exactTitle) :
+        (raw.trim() === 'Local' ? raw.replace('Local', '本地') : translate(raw));
       if (next !== node.nodeValue) node.nodeValue = next;
       return;
     }}
     if (node.nodeType !== 1) return;
-    if ((node.closest && node.closest('a[href*="/c/"]')) ||
-        (node.tagName === 'A' && /\/c\//.test(node.getAttribute('href') || ''))) return;
+    const conversationLink = (node.tagName === 'A' || node.getAttribute('role') === 'link') &&
+      /\/c\//.test(node.getAttribute('href') || node.getAttribute('data-href') || '');
+    if (conversationLink) {{
+      const fullTitle = (node.textContent || '').trim();
+      const title = Object.keys(TITLE_DICT).find((key) => fullTitle.includes(key));
+      if (title) {{
+        replaceTitleText(node, title, TITLE_DICT[title]);
+        node.setAttribute('aria-label', TITLE_DICT[title]);
+      }}
+      return;
+    }}
+    if (node.closest && node.closest('a[href*="/c/"]')) return;
     ['placeholder','title','aria-label'].forEach((name) => {{
       if (node.hasAttribute && node.hasAttribute(name)) {{
         const oldValue = node.getAttribute(name);
