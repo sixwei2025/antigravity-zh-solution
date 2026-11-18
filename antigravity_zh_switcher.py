@@ -30,14 +30,23 @@ MARKER = "Huixin Antigravity Chinese Localization"
 MENU_MARKER = f"{MARKER} Native Menu"
 MIN_SUPPORTED = (2, 21, 1)
 
+SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "huixin-antigravity-zh"
+GUARD_SCRIPT = SUPPORT_DIR / "antigravity_zh_switcher.py"
+GUARD_STATE = SUPPORT_DIR / "guard_state.json"
+GUARD_LOG = SUPPORT_DIR / "guard.log"
+LAUNCH_AGENT_LABEL = "com.huixin.antigravity-zh-guard"
+LAUNCH_AGENT_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
+
 TRANSLATIONS = {
     "Settings": "设置", "General": "常规", "Appearance": "外观", "Application": "应用",
     "Shortcuts": "快捷键", "Notifications": "通知", "Models": "模型", "Browser": "浏览器",
     "Customizations": "自定义", "Projects": "项目", "Conversations": "对话",
     "New Conversation": "新建对话", "Create New Project": "创建新项目", "No conversations yet": "暂无对话",
+    "No Project": "未选择项目", "No project": "未选择项目",
     "Search Conversations": "搜索对话", "Display Options": "显示选项", "Project options": "项目选项",
     "Automations": "自动化", "Scheduled Tasks": "计划任务", "Provide Feedback": "提供反馈",
-    "Welcome back,": "欢迎回来，", "Where should we pick up?": "我们要从哪里继续？", "Hey": "嗨",
+    "Welcome back,": "欢迎回来，", "Where should we pick up?": "我们要从哪里继续？",
+    "what should we build today?": "今天想做点什么？", "Hey": "嗨",
     "Open Settings": "打开设置", "Close": "关闭", "Save": "保存", "Cancel": "取消",
     "Apply": "应用", "Reset": "重置", "Advanced": "高级", "Language": "语言",
     "Theme": "主题", "System": "系统", "Light": "浅色", "Dark": "深色",
@@ -45,7 +54,7 @@ TRANSLATIONS = {
     "Interface Layout": "界面布局", "Knowledge Work": "知识工作", "Software Engineering": "软件开发",
     "Permissions": "权限", "Execution": "执行", "Voice mode": "语音模式", "Remote Control": "远程控制",
     "This Computer": "此电脑", "Remote": "远程", "Default": "默认", "Turbo": "高速",
-    "Local permissions": "本地权限", "Request Review": "请求审阅",
+    "Local permissions": "本地权限", "Local Permissions": "本地权限", "Request Review": "请求审阅",
     "Every command requires approval.": "每条命令都需要批准。",
     "Ask before sensitive operations.": "敏感操作前询问。",
     "Auto": "自动", "Automatically decide if commands run.": "自动决定是否运行命令。",
@@ -274,54 +283,110 @@ def inject_native_menu(path: Path) -> bool:
     return True
 
 
-def check() -> int:
-    print(f"Antigravity: {APP}")
+def is_app_running() -> bool:
+    return (
+        subprocess.run(
+            ["pgrep", "-f", "/Applications/Antigravity.app/Contents/MacOS/Antigravity"],
+            stdout=subprocess.DEVNULL,
+        ).returncode
+        == 0
+    )
+
+
+def notify(title: str, message: str) -> None:
+    try:
+        script = f'display notification {json.dumps(message)} with title {json.dumps(title)}'
+        subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def log_guard(message: str) -> None:
+    try:
+        SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with GUARD_LOG.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{stamp}] {message}\n")
+    except Exception:
+        pass
+
+
+def load_guard_state() -> dict:
+    if not GUARD_STATE.exists():
+        return {}
+    try:
+        return json.loads(GUARD_STATE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_guard_state(state: dict) -> None:
+    try:
+        SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+        GUARD_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def check(quiet: bool = False) -> int:
+    if not quiet:
+        print(f"Antigravity: {APP}")
     if not APP.exists() or not ASAR.exists():
-        print("结果：未找到原始 app.asar")
+        if not quiet:
+            print("结果：未找到原始 app.asar")
         return 2
     current = app_version()
-    print(f"版本：{current}")
-    print(f"架构：{os.uname().machine}")
-    print(f"app.asar SHA-256：{sha256(ASAR)}")
     paths = set(list_paths(read_asar_tree(ASAR)))
     candidates = sorted(path for path in paths if path.endswith("preload.js") or path.endswith("menu.js"))
-    print("候选入口：")
-    for path in candidates[:20]:
-        print(f"  - {path}")
     required = {"dist/preload.js", "dist/menu.js"}
     supported = version_tuple(current) >= MIN_SUPPORTED and required.issubset(paths)
-    print("结果：结构可识别，可以进入副本试运行" if supported else "结果：暂不支持自动安装")
-    print("注意：这还不是安装；不会改动应用。")
+    if not quiet:
+        print(f"版本：{current}")
+        print(f"架构：{os.uname().machine}")
+        print(f"app.asar SHA-256：{sha256(ASAR)}")
+        print("候选入口：")
+        for path in candidates[:20]:
+            print(f"  - {path}")
+        print("结果：结构可识别，可以进入副本试运行" if supported else "结果：暂不支持自动安装")
+        print("注意：这还不是安装；不会改动应用。")
     return 0 if supported else 1
 
 
-def install(force: bool) -> int:
-    if check() != 0 and not force:
-        print("未通过检查，未执行安装。需要明确使用 --force 才会继续。")
+def install(force: bool, quiet: bool = False) -> int:
+    if check(quiet=quiet) != 0 and not force:
+        if not quiet:
+            print("未通过检查，未执行安装。需要明确使用 --force 才会继续。")
         return 1
     if not ASAR.exists():
-        print("找不到 app.asar")
+        if not quiet:
+            print("找不到 app.asar")
         return 2
-    if UNPACKED.exists() or DISABLED_ASAR.exists():
-        print("检测到已有汉化/解包状态，先使用 restore。")
+    if is_app_running():
+        if not quiet:
+            print("请先完全退出 Antigravity，再运行 install。")
         return 1
+    # 官方升级可能会覆盖出新的 app.asar，同时残留旧的 app/ 或 app.asar.disabled；安全清理后再重装
+    if UNPACKED.exists():
+        shutil.rmtree(UNPACKED)
+    if DISABLED_ASAR.exists():
+        DISABLED_ASAR.unlink()
     reuse_backup = False
     if BACKUP.exists():
-        if ASAR.exists() and sha256(BACKUP) == sha256(ASAR):
+        if sha256(BACKUP) == sha256(ASAR):
             reuse_backup = True
-            print(f"复用未改变的原始备份：{BACKUP}")
+            if not quiet:
+                print(f"复用未改变的原始备份：{BACKUP}")
         else:
-            print(f"备份已存在且与当前 app.asar 不一致：{BACKUP}")
-            return 1
-    if subprocess.run(["pgrep", "-f", "/Applications/Antigravity.app"], stdout=subprocess.DEVNULL).returncode == 0:
-        print("请先完全退出 Antigravity，再运行 install。")
-        return 1
+            if not quiet:
+                print(f"检测到官方版本已更新，刷新原始备份：{BACKUP}")
     with tempfile.TemporaryDirectory(prefix="antigravity-zh-") as temp:
         staging = Path(temp) / "app"
         extract_asar(ASAR, staging)
         preload = staging / "dist" / "preload.js"
         if not preload.exists():
-            print("当前版本没有找到 dist/preload.js，已停止，未改动应用。")
+            if not quiet:
+                print("当前版本没有找到 dist/preload.js，已停止，未改动应用。")
             return 1
         inject(preload)
         menu = staging / "dist" / "menu.js"
@@ -331,7 +396,8 @@ def install(force: bool) -> int:
             shutil.copy2(ASAR, BACKUP)
         shutil.copytree(staging, UNPACKED)
     ASAR.rename(DISABLED_ASAR)
-    print("安装完成。请启动 Antigravity 检查界面；还原命令：restore")
+    if not quiet:
+        print("安装完成。请启动 Antigravity 检查界面；还原命令：restore")
     return 0
 
 
@@ -339,7 +405,7 @@ def restore() -> int:
     if not BACKUP.exists():
         print("没有找到汇芯备份，未执行还原。")
         return 1
-    if subprocess.run(["pgrep", "-f", "/Applications/Antigravity.app"], stdout=subprocess.DEVNULL).returncode == 0:
+    if is_app_running():
         print("请先完全退出 Antigravity，再运行 restore。")
         return 1
     if ASAR.exists():
@@ -353,16 +419,131 @@ def restore() -> int:
     return 0
 
 
+def is_localized() -> bool:
+    preload = UNPACKED / "dist" / "preload.js"
+    return UNPACKED.exists() and DISABLED_ASAR.exists() and not ASAR.exists() and preload.exists()
+
+
+def auto_sync() -> int:
+    """供 LaunchAgent 调用：检测到官方升级导致汉化丢失时自动重新注入。"""
+    if not APP.exists():
+        return 0
+    if is_localized():
+        return 0
+    if not ASAR.exists():
+        return 0
+
+    current = app_version()
+    if check(quiet=True) != 0:
+        state = load_guard_state()
+        if state.get("incompatible_notified") != current:
+            log_guard(f"检测到 Antigravity {current} 结构不兼容，已跳过自动汉化")
+            notify("汇芯 Antigravity 汉化守护", f"检测到新版本 {current} 结构有变化，暂未自动汉化，请检查工具更新。")
+            state["incompatible_notified"] = current
+            save_guard_state(state)
+        return 1
+
+    if is_app_running():
+        state = load_guard_state()
+        if state.get("pending_notified") != current:
+            log_guard(f"检测到 Antigravity {current} 汉化已失效（升级覆盖），等待用户退出后自动恢复")
+            notify("汇芯 Antigravity 汉化守护", f"检测到已升级到 {current}，完全退出应用后将自动恢复中文界面。")
+            state["pending_notified"] = current
+            save_guard_state(state)
+        return 0
+
+    code = install(force=False, quiet=True)
+    if code == 0:
+        log_guard(f"已自动为 Antigravity {current} 重新注入中文界面")
+        notify("汇芯 Antigravity 汉化守护", f"Antigravity {current} 中文界面已自动同步完成。")
+        state = load_guard_state()
+        state["last_synced_version"] = current
+        state.pop("pending_notified", None)
+        save_guard_state(state)
+    else:
+        log_guard(f"Antigravity {current} 自动汉化失败，退出码：{code}")
+    return code
+
+
+def guard_enable() -> int:
+    SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(Path(__file__).resolve(), GUARD_SCRIPT)
+    GUARD_SCRIPT.chmod(0o755)
+    LAUNCH_AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    plist_data = {
+        "Label": LAUNCH_AGENT_LABEL,
+        "ProgramArguments": [sys.executable, str(GUARD_SCRIPT), "auto-sync"],
+        "WatchPaths": [str(RESOURCES), str(APP / "Contents" / "Info.plist")],
+        "StartInterval": 60,
+        "RunAtLoad": True,
+        "StandardOutPath": str(GUARD_LOG),
+        "StandardErrorPath": str(GUARD_LOG),
+    }
+    with LAUNCH_AGENT_PLIST.open("wb") as handle:
+        plistlib.dump(plist_data, handle)
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LAUNCH_AGENT_LABEL}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    res = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(LAUNCH_AGENT_PLIST)], capture_output=True, text=True)
+    if res.returncode != 0:
+        # 兼容旧版 macOS launchctl load
+        subprocess.run(["launchctl", "unload", str(LAUNCH_AGENT_PLIST)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["launchctl", "load", str(LAUNCH_AGENT_PLIST)], check=False)
+    log_guard("已启用升级自动保持汉化守护服务")
+    print(f"已开启升级自动保持汉化守护：{LAUNCH_AGENT_PLIST}")
+    print(f"守护脚本副本：{GUARD_SCRIPT}")
+    print("以后每次 Antigravity 升级，只要退出应用，60 秒内会自动同步中文界面。")
+    auto_sync()
+    return 0
+
+
+def guard_disable() -> int:
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LAUNCH_AGENT_LABEL}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["launchctl", "unload", str(LAUNCH_AGENT_PLIST)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if LAUNCH_AGENT_PLIST.exists():
+        LAUNCH_AGENT_PLIST.unlink()
+    log_guard("已停用升级自动保持汉化守护服务")
+    print("已关闭升级自动保持汉化守护。")
+    return 0
+
+
+def guard_status() -> int:
+    print(f"Antigravity 版本：{app_version() if APP.exists() else '未安装'}")
+    print(f"当前界面状态：{'已汉化（生效中）' if is_localized() else '未汉化（官方英文版或刚升级）'}")
+    print(f"应用运行状态：{'运行中' if is_app_running() else '未运行'}")
+    print(f"自动守护配置：{'已启用' if LAUNCH_AGENT_PLIST.exists() else '未启用'}")
+    if LAUNCH_AGENT_PLIST.exists():
+        print(f"Plist 路径：{LAUNCH_AGENT_PLIST}")
+    if GUARD_LOG.exists():
+        lines = GUARD_LOG.read_text(encoding="utf-8", errors="ignore").splitlines()[-5:]
+        if lines:
+            print("最近守护日志：")
+            for line in lines:
+                print(f"  {line}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="汇芯 Antigravity 中文界面安全切换器")
-    parser.add_argument("command", choices=["check", "install", "restore"])
+    parser.add_argument(
+        "command",
+        choices=["check", "install", "restore", "auto-sync", "guard-enable", "guard-disable", "guard-status"],
+    )
     parser.add_argument("--force", action="store_true", help="跳过版本检查；仅在确认兼容时使用")
     args = parser.parse_args()
     if args.command == "check":
         return check()
     if args.command == "install":
         return install(args.force)
-    return restore()
+    if args.command == "restore":
+        return restore()
+    if args.command == "auto-sync":
+        return auto_sync()
+    if args.command == "guard-enable":
+        return guard_enable()
+    if args.command == "guard-disable":
+        return guard_disable()
+    return guard_status()
 
 
 if __name__ == "__main__":

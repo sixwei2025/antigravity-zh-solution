@@ -1,5 +1,11 @@
 # 更新记录
 
+## v0.3.0 — 2026-11-18
+
+- 适配 Antigravity `2.32.2`，补充 `No Project`、`Local Permissions`、`what should we build today?` 等界面词条。
+- 新增 `guard-enable`、`guard-disable`、`guard-status`、`auto-sync` 命令：通过 macOS LaunchAgent 监听应用更新，每次 Antigravity 官方升级覆盖后，只要退出重启即可自动恢复中文界面，无需手动重新安装。
+- 改进 `install` 逻辑：官方升级覆盖 `app.asar` 时自动刷新备份并清理旧版残留解包目录。
+
 ## v0.2.0 — 2026-11-14
 
 - 按汇芯开源产品标准重构 README 首屏、安装入口、工作原理、常见问题和品牌露出。
