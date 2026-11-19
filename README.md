@@ -6,10 +6,10 @@
 
 ### 给 macOS Antigravity 加上一层自然、可回滚的中文界面适配
 
-![Version](https://img.shields.io/badge/version-v0.3.0-c8102e?style=flat-square)
+![Version](https://img.shields.io/badge/version-v0.3.1-c8102e?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS-111318?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-555555?style=flat-square)
-![Tested](https://img.shields.io/badge/tested-Antigravity%202.32.2-2f855a?style=flat-square)
+![Tested](https://img.shields.io/badge/tested-Antigravity%202.33.0-2f855a?style=flat-square)
 
 > 袁六伟 · 台州汇芯创始人｜得到 / 华为分享老师｜多家企业 AI 落地顾问
 >
@@ -47,9 +47,11 @@ https://github.com/sixwei2025/antigravity-zh-solution
 ```bash
 python3 antigravity_zh_switcher.py check
 python3 antigravity_zh_switcher.py install
-# 开启升级自动保持汉化（推荐：以后 Antigravity 升级后退出重启即可自动恢复中文）
+# 开启升级自动保持汉化（推荐：以后 Antigravity 升级后退出重启即可 15 秒内自动恢复中文）
 python3 antigravity_zh_switcher.py guard-enable
 ```
+
+> **macOS 一次性授权提示**：首次运行 `guard-enable` 会自动生成静默后台应用壳 `~/Library/Application Support/huixin-antigravity-zh/HuixinZhGuard.app`。请在 **系统设置 → 隐私与安全性 → App 管理** 中添加并打开 `HuixinZhGuard.app` 的开关，之后每次官方升级都会在后台自动静默恢复汉化，无需再次授权。
 
 查看守护状态或关闭自动守护：
 
@@ -64,7 +66,7 @@ python3 antigravity_zh_switcher.py guard-disable
 python3 antigravity_zh_switcher.py restore
 ```
 
-第一次使用建议只运行 `check`。工具当前针对 Antigravity `2.32.2`、Apple Silicon、含 `app.asar.unpacked` 的 macOS 结构完成验证；如果版本结构不匹配，会停止而不是强行覆盖。`--force` 只用于已经确认兼容的版本。
+第一次使用建议只运行 `check`。工具当前针对 Antigravity `2.33.0`、Apple Silicon、含 `app.asar.unpacked` 的 macOS 结构完成验证；如果版本结构不匹配，会停止而不是强行覆盖。`--force` 只用于已经确认兼容的版本。
 
 ## 工作原理
 

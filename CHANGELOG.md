@@ -1,5 +1,12 @@
 # 更新记录
 
+## v0.3.1 — 2026-11-19
+
+- 验证适配 Antigravity `2.33.0`。
+- 新增 `HuixinZhGuard.app` 静默后台授权壳（`guard-enable` 时自动编译签名）：解决 macOS「App 管理」拦截后台 LaunchAgent 修改 `/Applications/Antigravity.app` 的权限问题，一次授权即可永久自动保持汉化。
+- 将原始 `app.asar` 备份目录移至 `~/Library/Application Support/huixin-antigravity-zh/`，避免受应用包保护或更新清理影响。
+- 优化守护响应速度（检测间隔缩短至 `15` 秒），并完善缺少权限时的桌面通知提示。
+
 ## v0.3.0 — 2026-11-18
 
 - 适配 Antigravity `2.32.2`，补充 `No Project`、`Local Permissions`、`what should we build today?` 等界面词条。

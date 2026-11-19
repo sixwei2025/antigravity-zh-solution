@@ -24,7 +24,7 @@ APP = Path("/Applications/Antigravity.app")
 RESOURCES = APP / "Contents" / "Resources"
 ASAR = RESOURCES / "app.asar"
 DISABLED_ASAR = RESOURCES / "app.asar.disabled"
-BACKUP = RESOURCES / "app.asar.huixin-backup"
+BACKUP = Path.home() / "Library" / "Application Support" / "huixin-antigravity-zh" / "app.asar.huixin-backup"
 UNPACKED = RESOURCES / "app"
 MARKER = "Huixin Antigravity Chinese Localization"
 MENU_MARKER = f"{MARKER} Native Menu"
@@ -32,6 +32,8 @@ MIN_SUPPORTED = (2, 21, 1)
 
 SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "huixin-antigravity-zh"
 GUARD_SCRIPT = SUPPORT_DIR / "antigravity_zh_switcher.py"
+GUARD_APP = SUPPORT_DIR / "HuixinZhGuard.app"
+GUARD_BIN = GUARD_APP / "Contents" / "MacOS" / "HuixinZhGuard"
 GUARD_STATE = SUPPORT_DIR / "guard_state.json"
 GUARD_LOG = SUPPORT_DIR / "guard.log"
 LAUNCH_AGENT_LABEL = "com.huixin.antigravity-zh-guard"
@@ -452,29 +454,88 @@ def auto_sync() -> int:
             save_guard_state(state)
         return 0
 
-    code = install(force=False, quiet=True)
+    try:
+        code = install(force=False, quiet=True)
+    except PermissionError as exc:
+        state = load_guard_state()
+        if state.get("permission_notified") != current:
+            log_guard(f"Antigravity {current} 自动汉化缺少 App 管理权限：{exc}")
+            notify("汇芯 Antigravity 汉化守护", "请在系统设置 → 隐私与安全性 → App 管理中允许 HuixinZhGuard.app 修改应用。")
+            state["permission_notified"] = current
+            save_guard_state(state)
+        return 1
     if code == 0:
         log_guard(f"已自动为 Antigravity {current} 重新注入中文界面")
         notify("汇芯 Antigravity 汉化守护", f"Antigravity {current} 中文界面已自动同步完成。")
         state = load_guard_state()
         state["last_synced_version"] = current
         state.pop("pending_notified", None)
+        state.pop("permission_notified", None)
         save_guard_state(state)
     else:
         log_guard(f"Antigravity {current} 自动汉化失败，退出码：{code}")
     return code
 
 
+def ensure_guard_app() -> bool:
+    """在首次启用守护时生成静默 .app 包装器，便于在 macOS「App 管理」中持久授权。"""
+    if GUARD_BIN.exists():
+        return True
+    clang = shutil.which("clang")
+    codesign = shutil.which("codesign")
+    if not clang or not codesign:
+        return False
+    macos_dir = GUARD_APP / "Contents" / "MacOS"
+    macos_dir.mkdir(parents=True, exist_ok=True)
+    plist_data = {
+        "CFBundleDevelopmentRegion": "zh_CN",
+        "CFBundleExecutable": "HuixinZhGuard",
+        "CFBundleIdentifier": "com.huixin.antigravity-zh-guard-helper",
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "HuixinZhGuard",
+        "CFBundleDisplayName": "汇芯 Antigravity 汉化守护",
+        "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": "1",
+        "LSBackgroundOnly": True,
+        "LSUIElement": True,
+    }
+    with (GUARD_APP / "Contents" / "Info.plist").open("wb") as handle:
+        plistlib.dump(plist_data, handle)
+    python_bin = shutil.which("python3") or sys.executable
+    c_source = (
+        "#include <unistd.h>\n"
+        "int main(void) {\n"
+        f'    char *argv[] = {{{json.dumps(python_bin)}, {json.dumps(str(GUARD_SCRIPT))}, "auto-sync", NULL}};\n'
+        f"    execv({json.dumps(python_bin)}, argv);\n"
+        "    return 127;\n"
+        "}\n"
+    )
+    with tempfile.TemporaryDirectory(prefix="huixin-guard-build-") as temp:
+        src = Path(temp) / "guard.c"
+        src.write_text(c_source, encoding="utf-8")
+        res = subprocess.run([clang, "-O2", "-Wall", "-Wextra", str(src), "-o", str(GUARD_BIN)], capture_output=True)
+        if res.returncode != 0:
+            return False
+    sign_res = subprocess.run(
+        [codesign, "--force", "--deep", "--sign", "-", "--identifier", "com.huixin.antigravity-zh-guard-helper", str(GUARD_APP)],
+        capture_output=True,
+    )
+    return sign_res.returncode == 0
+
+
 def guard_enable() -> int:
     SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(Path(__file__).resolve(), GUARD_SCRIPT)
     GUARD_SCRIPT.chmod(0o755)
+    has_guard_app = ensure_guard_app()
     LAUNCH_AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    program_args = [str(GUARD_BIN)] if has_guard_app and GUARD_BIN.exists() else [sys.executable, str(GUARD_SCRIPT), "auto-sync"]
     plist_data = {
         "Label": LAUNCH_AGENT_LABEL,
-        "ProgramArguments": [sys.executable, str(GUARD_SCRIPT), "auto-sync"],
+        "ProgramArguments": program_args,
         "WatchPaths": [str(RESOURCES), str(APP / "Contents" / "Info.plist")],
-        "StartInterval": 60,
+        "StartInterval": 15,
         "RunAtLoad": True,
         "StandardOutPath": str(GUARD_LOG),
         "StandardErrorPath": str(GUARD_LOG),
@@ -491,7 +552,10 @@ def guard_enable() -> int:
     log_guard("已启用升级自动保持汉化守护服务")
     print(f"已开启升级自动保持汉化守护：{LAUNCH_AGENT_PLIST}")
     print(f"守护脚本副本：{GUARD_SCRIPT}")
-    print("以后每次 Antigravity 升级，只要退出应用，60 秒内会自动同步中文界面。")
+    if GUARD_APP.exists():
+        print(f"授权应用壳：{GUARD_APP}")
+        print("首次使用请在「系统设置 → 隐私与安全性 → App 管理」中添加并允许 HuixinZhGuard.app，之后永久自动生效。")
+    print("以后每次 Antigravity 升级，只要退出应用，15 秒内会自动同步中文界面。")
     auto_sync()
     return 0
 
