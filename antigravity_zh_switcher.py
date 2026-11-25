@@ -8,6 +8,7 @@ app 目录加载方式注入可回滚的 DOM 翻译层。它不会读取账号�
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -17,6 +18,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -27,7 +29,10 @@ DISABLED_ASAR = RESOURCES / "app.asar.disabled"
 BACKUP = Path.home() / "Library" / "Application Support" / "huixin-antigravity-zh" / "app.asar.huixin-backup"
 UNPACKED = RESOURCES / "app"
 MARKER = "Huixin Antigravity Chinese Localization"
+END_MARKER = f"{MARKER} END"
 MENU_MARKER = f"{MARKER} Native Menu"
+TRAY_MARKER = f"{MARKER} Native Tray"
+SIDECAR_MARKER = f"{MARKER} Sidecar"
 MIN_SUPPORTED = (2, 21, 1)
 
 SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "huixin-antigravity-zh"
@@ -36,56 +41,104 @@ GUARD_APP = SUPPORT_DIR / "HuixinZhGuard.app"
 GUARD_BIN = GUARD_APP / "Contents" / "MacOS" / "HuixinZhGuard"
 GUARD_STATE = SUPPORT_DIR / "guard_state.json"
 GUARD_LOG = SUPPORT_DIR / "guard.log"
+GUARD_LOCK = SUPPORT_DIR / "guard.lock"
 LAUNCH_AGENT_LABEL = "com.huixin.antigravity-zh-guard"
 LAUNCH_AGENT_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 
-TRANSLATIONS = {
-    "Settings": "设置", "General": "常规", "Appearance": "外观", "Application": "应用",
-    "Shortcuts": "快捷键", "Notifications": "通知", "Models": "模型", "Browser": "浏览器",
-    "Customizations": "自定义", "Projects": "项目", "Conversations": "对话",
-    "New Conversation": "新建对话", "Create New Project": "创建新项目", "No conversations yet": "暂无对话",
-    "No Project": "未选择项目", "No project": "未选择项目",
-    "Search Conversations": "搜索对话", "Display Options": "显示选项", "Project options": "项目选项",
-    "Automations": "自动化", "Scheduled Tasks": "计划任务", "Provide Feedback": "提供反馈",
-    "Welcome back,": "欢迎回来，", "Where should we pick up?": "我们要从哪里继续？",
-    "what should we build today?": "今天想做点什么？", "Hey": "嗨",
-    "Open Settings": "打开设置", "Close": "关闭", "Save": "保存", "Cancel": "取消",
-    "Apply": "应用", "Reset": "重置", "Advanced": "高级", "Language": "语言",
-    "Theme": "主题", "System": "系统", "Light": "浅色", "Dark": "深色",
-    "Font": "字体", "Font Size": "字体大小", "Volume": "音量", "Microphone": "麦克风",
-    "Interface Layout": "界面布局", "Knowledge Work": "知识工作", "Software Engineering": "软件开发",
-    "Permissions": "权限", "Execution": "执行", "Voice mode": "语音模式", "Remote Control": "远程控制",
-    "This Computer": "此电脑", "Remote": "远程", "Default": "默认", "Turbo": "高速",
-    "Local permissions": "本地权限", "Local Permissions": "本地权限", "Request Review": "请求审阅",
-    "Every command requires approval.": "每条命令都需要批准。",
-    "Ask before sensitive operations.": "敏感操作前询问。",
-    "Auto": "自动", "Automatically decide if commands run.": "自动决定是否运行命令。",
-    "Run all commands without restrictions.": "不受限制地运行所有命令。",
-    "Prevent Sleep": "防止睡眠", "Keep In Menu Bar": "保留在菜单栏", "Enable Remote Control": "启用远程控制",
-    "Queued Messages": "排队消息", "Interrupt the agent and send immediately.": "中断智能体并立即发送。",
-    "Queue until after the current turn.": "等当前轮次结束后再发送。",
-    "Ask anything, @ to mention, / for actions": "输入问题，使用 @ 提及，使用 / 执行操作",
-    "Message input": "消息输入框", "Add context": "添加上下文", "Select model": "选择模型",
-    "Record voice memo": "录制语音备忘", "Start Voice mode": "开始语音模式", "Toggle Sidebar": "切换侧边栏",
-    "Toggle Side Panel": "切换侧面板", "More actions": "更多操作", "More options": "更多选项",
-    "Copy": "复制", "Undo to this point": "撤销到此处", "Good response": "回答得不错",
-    "Bad response": "回答需要改进", "Worked for": "运行耗时", "now": "刚刚", "just now": "刚刚",
-    "Conversation Log": "对话记录", "You said": "你说", "Agent said": "智能体说",
-    "Agent working": "智能体工作中", "Waiting for user input": "等待你的输入",
-    "Load older messages": "加载更早消息", "No more older messages": "没有更早消息",
-    "Analyzing": "正在分析", "Turn": "轮次", "of": "共",
-    "Loading": "正在加载", "Loading Antigravity": "正在加载 Antigravity", "Error": "错误",
-    "Success": "成功", "Failed": "失败", "Running": "运行中", "Completed": "已完成",
-    "File": "文件", "Edit": "编辑", "View": "视图", "Window": "窗口", "Help": "帮助",
-    "New Window": "新建窗口", "Quit": "退出", "Check for Updates": "检查更新",
+DICT_LOAD_ORDER = [
+    "common.json",
+    "menu_nav.json",
+    "page_agents.json",
+    "page_main.json",
+    "page_mcp_knowledge.json",
+    "page_settings.json",
+    "huixin_polish.json",
+]
+
+NATIVE_MENU_TRANSLATIONS = {
+    "File": "文件",
+    "Edit": "编辑",
+    "View": "视图",
+    "Window": "窗口",
+    "Help": "帮助",
+    "New Window": "新建窗口",
+    "Create Project": "创建项目",
+    "Command Palette": "命令面板",
+    "Docs": "文档",
+    "Check for Updates": "检查更新",
+    "Checking for Updates...": "正在检查更新...",
+    "Downloading Update...": "正在下载更新...",
+    "Restart to Update": "重启以更新",
+    "Toggle Developer Tools": "切换开发者工具",
+    "Undo": "撤销",
+    "Redo": "重做",
+    "Cut": "剪切",
+    "Copy": "复制",
+    "Paste": "粘贴",
+    "Paste and Match Style": "粘贴并匹配样式",
+    "Delete": "删除",
+    "Select All": "全选",
+    "Minimize": "最小化",
+    "Maximize": "最大化",
+    "Close": "关闭",
+    "Close Window": "关闭窗口",
+    "Zoom": "缩放",
+    "Reset Zoom": "重置缩放",
+    "Actual Size": "实际大小",
+    "Zoom In": "放大",
+    "Zoom Out": "缩小",
+    "Toggle Full Screen": "切换全屏",
+    "Bring All to Front": "前置全部窗口",
+    "Toggle Between Light/Dark Themes": "切换浅色/深色主题",
+    "Split Terminal": "拆分终端",
+    "Split Conversation Horizontally": "水平拆分对话",
+    "Split Conversation Vertically": "垂直拆分对话",
+    "Split": "拆分",
+    "Split Right": "向右拆分",
+    "Split Down": "向下拆分",
+    "Replace With New": "替换为新对话",
+    "Show in File Explorer": "在文件管理器中显示",
+    "Reveal in Finder": "在访达中显示",
+    "Find in conversation": "在对话中查找",
+    "Connect to WSL": "连接到 WSL",
+    "Reopen Locally": "在本地重新打开",
+    "About Antigravity": "关于 Antigravity",
+    "Settings...": "设置...",
+    "Preferences...": "偏好设置...",
+    "Services": "服务",
+    "Hide Antigravity": "隐藏 Antigravity",
+    "Hide Others": "隐藏其他",
+    "Show All": "全部显示",
+    "Quit Antigravity": "退出 Antigravity",
+    "Quit": "退出",
+    "Open Antigravity": "打开 Antigravity",
+    "Version": "版本",
 }
 
-CONVERSATION_TITLES = {
-    "Gemini Hydrogen Promo Video Creation": "Gemini Hydrogen 宣传视频制作",
-    "Redesigning Company Official Website": "公司官网改版设计",
-    "Local Video Promotional Style Review": "本地视频宣传风格评审",
-    "Language Setting Location": "语言设置位置",
-}
+
+def resolve_asset_dir(name: str) -> Path:
+    local_dir = Path(__file__).resolve().parent / name
+    if local_dir.is_dir():
+        return local_dir
+    support_dir = SUPPORT_DIR / name
+    if support_dir.is_dir():
+        return support_dir
+    raise RuntimeError(f"找不到资源目录：{name}（已检查 {local_dir} 与 {support_dir}）")
+
+
+def load_dictionary() -> dict[str, str]:
+    dicts_dir = resolve_asset_dir("dicts")
+    merged: dict[str, str] = {}
+    for filename in DICT_LOAD_ORDER:
+        file_path = dicts_dir / filename
+        if not file_path.exists():
+            continue
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(k, str) and isinstance(v, str):
+                    merged[k] = v
+    return merged
 
 
 def version_tuple(value: str) -> tuple[int, int, int]:
@@ -98,9 +151,15 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 
 
 def app_version() -> str:
-    with (APP / "Contents" / "Info.plist").open("rb") as handle:
-        info = plistlib.load(handle)
-    return str(info.get("CFBundleShortVersionString", "unknown"))
+    plist_path = APP / "Contents" / "Info.plist"
+    if not plist_path.exists():
+        return "unknown"
+    try:
+        with plist_path.open("rb") as handle:
+            info = plistlib.load(handle)
+        return str(info.get("CFBundleShortVersionString", "unknown"))
+    except Exception:
+        return "unknown"
 
 
 def sha256(path: Path) -> str:
@@ -164,74 +223,13 @@ def js_string(value: str) -> str:
 
 
 def make_injection() -> str:
-    dictionary = json.dumps(TRANSLATIONS, ensure_ascii=False, separators=(",", ":"))
-    title_dictionary = json.dumps(CONVERSATION_TITLES, ensure_ascii=False, separators=(",", ":"))
-    return f"""
-/* {MARKER} */
-(function () {{
-  const DICT = {dictionary};
-  const TITLE_DICT = {title_dictionary};
-  const SKIP = new Set(['INPUT','TEXTAREA','PRE','CODE','SCRIPT','STYLE']);
-  const translate = (text) => {{
-    if (!text || !text.trim()) return text;
-    let value = text;
-    Object.keys(DICT).sort((a,b) => b.length - a.length).forEach((key) => {{
-      value = value.split(key).join(DICT[key]);
-    }});
-    return value;
-  }};
-  const replaceTitleText = (node, title, replacement) => {{
-    Array.from(node.childNodes || []).forEach((child) => {{
-      if (child.nodeType === 3) {{
-        child.nodeValue = child.nodeValue.replace(title, replacement);
-      }} else if (child.nodeType === 1) {{
-        replaceTitleText(child, title, replacement);
-      }}
-    }});
-  }};
-  const visit = (node) => {{
-    if (!node || (node.nodeType === 1 && SKIP.has(node.tagName))) return;
-    if (node.nodeType === 3) {{
-      const raw = node.nodeValue || '';
-      const exactTitle = TITLE_DICT[raw.trim()];
-      const next = exactTitle ? raw.replace(raw.trim(), exactTitle) :
-        (raw.trim() === 'Local' ? raw.replace('Local', '本地') : translate(raw));
-      if (next !== node.nodeValue) node.nodeValue = next;
-      return;
-    }}
-    if (node.nodeType !== 1) return;
-    const conversationLink = (node.tagName === 'A' || node.getAttribute('role') === 'link') &&
-      /\/c\//.test(node.getAttribute('href') || node.getAttribute('data-href') || '');
-    if (conversationLink) {{
-      const fullTitle = (node.textContent || '').trim();
-      const title = Object.keys(TITLE_DICT).find((key) => fullTitle.includes(key));
-      if (title) {{
-        replaceTitleText(node, title, TITLE_DICT[title]);
-        node.setAttribute('aria-label', TITLE_DICT[title]);
-      }}
-      return;
-    }}
-    if (node.closest && node.closest('a[href*="/c/"]')) return;
-    ['placeholder','title','aria-label'].forEach((name) => {{
-      if (node.hasAttribute && node.hasAttribute(name)) {{
-        const oldValue = node.getAttribute(name);
-        const nextValue = translate(oldValue);
-        if (nextValue !== oldValue) node.setAttribute(name, nextValue);
-      }}
-    }});
-    node.childNodes && Array.from(node.childNodes).forEach(visit);
-  }};
-  const start = () => {{
-    if (!document.body || !document.documentElement) {{
-      setTimeout(start, 0);
-      return;
-    }}
-    visit(document.body);
-    new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach(visit))).observe(document.documentElement, {{childList:true,subtree:true}});
-  }};
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {{once:true}}); else start();
-}})();
-"""
+    runtime_path = resolve_asset_dir("runtime") / "preload_runtime.js"
+    if not runtime_path.exists():
+        raise RuntimeError(f"找不到运行时文件：{runtime_path}")
+    dictionary = json.dumps(load_dictionary(), ensure_ascii=False, separators=(",", ":"))
+    runtime_js = runtime_path.read_text(encoding="utf-8")
+    runtime_js = runtime_js.replace("__USE_TW_PLACEHOLDER__", "false").replace("DICT_PLACEHOLDER", dictionary)
+    return f"\n/* {MARKER} */\n{runtime_js}\n/* {END_MARKER} */\n"
 
 
 def inject(path: Path) -> bool:
@@ -245,29 +243,31 @@ def inject(path: Path) -> bool:
 
 
 def inject_native_menu(path: Path) -> bool:
-    """Wrap Electron's application menu setter so macOS menu labels are Chinese too."""
+    """Wrap Electron's application menu setter with exact-match Chinese labels."""
     if not path.exists():
         return False
     text = path.read_text(encoding="utf-8", errors="ignore")
     if MENU_MARKER in text:
         return True
-    dictionary = json.dumps(TRANSLATIONS, ensure_ascii=False, separators=(",", ":"))
+    dictionary = json.dumps(NATIVE_MENU_TRANSLATIONS, ensure_ascii=False, separators=(",", ":"))
     wrapper = f"""
 /* {MENU_MARKER} */
 (function () {{
   const DICT = {dictionary};
-  const translate = (value) => {{
-    if (!value || !value.trim()) return value;
-    let result = value;
-    Object.keys(DICT).sort((a,b) => b.length - a.length).forEach((key) => {{
-      result = result.split(key).join(DICT[key]);
-    }});
-    return result;
+  const LOWER_DICT = Object.fromEntries(Object.entries(DICT).map(([k, v]) => [k.toLowerCase(), v]));
+  const translateLabel = (value) => {{
+    if (!value || typeof value !== 'string') return value;
+    const trimmed = value.replace(/&([a-zA-Z])/g, '$1').trim();
+    if (!trimmed) return value;
+    if (Object.prototype.hasOwnProperty.call(DICT, trimmed)) return DICT[trimmed];
+    const lower = trimmed.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(LOWER_DICT, lower)) return LOWER_DICT[lower];
+    return value;
   }};
   const walk = (menu) => {{
     if (!menu || !menu.items) return;
     menu.items.forEach((item) => {{
-      if (item.label) item.label = translate(item.label);
+      if (item.label) item.label = translateLabel(item.label);
       if (item.submenu) walk(item.submenu);
     }});
   }};
@@ -285,14 +285,135 @@ def inject_native_menu(path: Path) -> bool:
     return True
 
 
+def inject_tray(path: Path) -> bool:
+    """Localize macOS menu bar tray items and active agent count."""
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if TRAY_MARKER in text:
+        return True
+    dictionary = json.dumps(NATIVE_MENU_TRANSLATIONS, ensure_ascii=False, separators=(",", ":"))
+    tray_js = f"""
+/* {TRAY_MARKER} */
+(function () {{
+  const DICT = {dictionary};
+  const LOWER_DICT = Object.fromEntries(Object.entries(DICT).map(([k, v]) => [k.toLowerCase(), v]));
+  const translateLabel = (value) => {{
+    if (!value || typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    if (!trimmed) return value;
+    if (Object.prototype.hasOwnProperty.call(DICT, trimmed)) return DICT[trimmed];
+    const lower = trimmed.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(LOWER_DICT, lower)) return LOWER_DICT[lower];
+    const m = trimmed.match(/^(\\d+|No)\\s+agents?\\s+running$/i);
+    if (m) {{
+      return m[1].toLowerCase() === 'no' ? '暂无运行中的智能体' : m[1] + ' 个智能体运行中';
+    }}
+    return value;
+  }};
+  try {{
+    const electron = require('electron');
+    const origBuild = electron.Menu.buildFromTemplate;
+    electron.Menu.buildFromTemplate = function (template) {{
+      if (Array.isArray(template)) {{
+        template = template.map((item) => item && item.label ? Object.assign({{}}, item, {{ label: translateLabel(item.label) }}) : item);
+      }}
+      return origBuild.call(this, template);
+    }};
+    const origMenuItem = electron.MenuItem;
+    electron.MenuItem = function (options) {{
+      if (options && options.label) {{
+        options = Object.assign({{}}, options, {{ label: translateLabel(options.label) }});
+      }}
+      return new origMenuItem(options);
+    }};
+    electron.MenuItem.prototype = origMenuItem.prototype;
+  }} catch (_) {{}}
+}})();
+"""
+    # Also localize updateTrayAgentCount inline if present
+    text = text.replace(
+        "(count > 0 ? `${count}` : 'No') +\n                    ' agent' +\n                    (count === 1 ? '' : 's') +\n                    ' running'",
+        "(count > 0 ? `${count} 个智能体运行中` : '暂无运行中的智能体')",
+    )
+    path.write_text(text.rstrip() + "\n" + tray_js, encoding="utf-8")
+    return True
+
+
+def inject_sidecar(path: Path) -> bool:
+    """Inject Sidecar iframe localization hook into dist/utils.js."""
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if SIDECAR_MARKER in text:
+        return True
+    target = "hubContents.on('will-navigate', guardExternalNavigation);"
+    idx = text.find(target)
+    if idx == -1:
+        return False
+    hook = f"""/* {SIDECAR_MARKER} */
+    const getSidecarLocalizationScript = () => {{
+        const preloadFile = typeof path_1 !== 'undefined' && path_1 && path_1.default
+            ? path_1.default.join(__dirname, 'preload.js')
+            : require('path').join(__dirname, 'preload.js');
+        const cacheKey = '__huixinSidecarScript:' + preloadFile;
+        if (typeof globalThis[cacheKey] === 'string') return globalThis[cacheKey];
+        try {{
+            const fsMod = typeof fs !== 'undefined' && fs && typeof fs.readFileSync === 'function' ? fs : require('fs');
+            const src = fsMod.readFileSync(preloadFile, 'utf8');
+            const sIdx = src.indexOf('/* {MARKER} */');
+            const eIdx = sIdx !== -1 ? src.indexOf('/* {END_MARKER} */', sIdx) : -1;
+            if (sIdx !== -1 && eIdx !== -1) {{
+                const extracted = src.slice(sIdx, eIdx + '/* {END_MARKER} */'.length);
+                globalThis[cacheKey] = extracted;
+                return extracted;
+            }}
+        }} catch (_) {{}}
+        return '';
+    }};
+    const injectSidecarSubframe = (frame) => {{
+        try {{
+            const winDestroyed = typeof win !== 'undefined' && win && win.isDestroyed?.();
+            if (!frame || frame.isDestroyed?.() || winDestroyed || hubContents.isDestroyed?.()) return;
+            const mainFrame = hubContents.mainFrame;
+            if (!mainFrame || frame === mainFrame || frame.parent !== mainFrame) return;
+            const frameUrl = String(frame.url || '');
+            if (!/^(?:https?|plugin):\\/\\//i.test(frameUrl)) return;
+            const script = getSidecarLocalizationScript();
+            if (!script) return;
+            frame.executeJavaScript(script).catch(() => undefined);
+        }} catch (_) {{}}
+    }};
+    hubContents.on('did-frame-navigate', (e, _u, _c, _t, isMain, pid, rid) => {{
+        if (!isMain) injectSidecarSubframe(e?.frame || electron_1.webFrameMain?.fromId?.(pid, rid));
+    }});
+    hubContents.on('did-frame-finish-load', (e, isMain, pid, rid) => {{
+        if (!isMain) injectSidecarSubframe(e?.frame || electron_1.webFrameMain?.fromId?.(pid, rid));
+    }});
+    """
+    path.write_text(text[:idx] + hook + text[idx:], encoding="utf-8")
+    return True
+
+
 def is_app_running() -> bool:
-    return (
+    if (
         subprocess.run(
             ["pgrep", "-f", "/Applications/Antigravity.app/Contents/MacOS/Antigravity"],
             stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         ).returncode
         == 0
-    )
+    ):
+        return True
+    try:
+        res = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True, timeout=3)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if line.strip() == "/Applications/Antigravity.app/Contents/MacOS/Antigravity":
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 def notify(title: str, message: str) -> None:
@@ -331,22 +452,36 @@ def save_guard_state(state: dict) -> None:
         pass
 
 
+def resolve_source_asar() -> Path | None:
+    if ASAR.exists():
+        return ASAR
+    if DISABLED_ASAR.exists():
+        return DISABLED_ASAR
+    if BACKUP.exists():
+        return BACKUP
+    return None
+
+
 def check(quiet: bool = False) -> int:
     if not quiet:
         print(f"Antigravity: {APP}")
-    if not APP.exists() or not ASAR.exists():
+    source_asar = resolve_source_asar()
+    if not APP.exists() or source_asar is None:
         if not quiet:
             print("结果：未找到原始 app.asar")
         return 2
     current = app_version()
-    paths = set(list_paths(read_asar_tree(ASAR)))
-    candidates = sorted(path for path in paths if path.endswith("preload.js") or path.endswith("menu.js"))
+    paths = set(list_paths(read_asar_tree(source_asar)))
+    candidates = sorted(
+        path for path in paths
+        if path.endswith("preload.js") or path.endswith("menu.js") or path.endswith("tray.js") or path.endswith("utils.js")
+    )
     required = {"dist/preload.js", "dist/menu.js"}
     supported = version_tuple(current) >= MIN_SUPPORTED and required.issubset(paths)
     if not quiet:
         print(f"版本：{current}")
         print(f"架构：{os.uname().machine}")
-        print(f"app.asar SHA-256：{sha256(ASAR)}")
+        print(f"来源：{source_asar.name}（SHA-256：{sha256(source_asar)}）")
         print("候选入口：")
         for path in candidates[:20]:
             print(f"  - {path}")
@@ -360,7 +495,8 @@ def install(force: bool, quiet: bool = False) -> int:
         if not quiet:
             print("未通过检查，未执行安装。需要明确使用 --force 才会继续。")
         return 1
-    if not ASAR.exists():
+    source_asar = resolve_source_asar()
+    if source_asar is None:
         if not quiet:
             print("找不到 app.asar")
         return 2
@@ -369,13 +505,19 @@ def install(force: bool, quiet: bool = False) -> int:
             print("请先完全退出 Antigravity，再运行 install。")
         return 1
     # 官方升级可能会覆盖出新的 app.asar，同时残留旧的 app/ 或 app.asar.disabled；安全清理后再重装
+    if source_asar == DISABLED_ASAR and not ASAR.exists():
+        DISABLED_ASAR.rename(ASAR)
+        source_asar = ASAR
+    elif source_asar == BACKUP and not ASAR.exists():
+        shutil.copy2(BACKUP, ASAR)
+        source_asar = ASAR
     if UNPACKED.exists():
         shutil.rmtree(UNPACKED)
     if DISABLED_ASAR.exists():
         DISABLED_ASAR.unlink()
     reuse_backup = False
     if BACKUP.exists():
-        if sha256(BACKUP) == sha256(ASAR):
+        if sha256(BACKUP) == sha256(source_asar):
             reuse_backup = True
             if not quiet:
                 print(f"复用未改变的原始备份：{BACKUP}")
@@ -384,18 +526,20 @@ def install(force: bool, quiet: bool = False) -> int:
                 print(f"检测到官方版本已更新，刷新原始备份：{BACKUP}")
     with tempfile.TemporaryDirectory(prefix="antigravity-zh-") as temp:
         staging = Path(temp) / "app"
-        extract_asar(ASAR, staging)
+        extract_asar(source_asar, staging)
         preload = staging / "dist" / "preload.js"
         if not preload.exists():
             if not quiet:
                 print("当前版本没有找到 dist/preload.js，已停止，未改动应用。")
             return 1
         inject(preload)
-        menu = staging / "dist" / "menu.js"
-        inject_native_menu(menu)
+        inject_native_menu(staging / "dist" / "menu.js")
+        inject_tray(staging / "dist" / "tray.js")
+        inject_sidecar(staging / "dist" / "utils.js")
         # 保留解包目录，Electron 会在 app.asar.disabled 时加载它。
         if not reuse_backup:
-            shutil.copy2(ASAR, BACKUP)
+            SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_asar, BACKUP)
         shutil.copytree(staging, UNPACKED)
     ASAR.rename(DISABLED_ASAR)
     if not quiet:
@@ -423,12 +567,52 @@ def restore() -> int:
 
 def is_localized() -> bool:
     preload = UNPACKED / "dist" / "preload.js"
-    return UNPACKED.exists() and DISABLED_ASAR.exists() and not ASAR.exists() and preload.exists()
+    if not (UNPACKED.exists() and DISABLED_ASAR.exists() and not ASAR.exists() and preload.exists()):
+        return False
+    try:
+        return MARKER in preload.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return False
 
 
-def auto_sync() -> int:
-    """供 LaunchAgent 调用：检测到官方升级导致汉化丢失时自动重新注入。"""
-    if not APP.exists():
+def prompt_restart_for_localization(version: str) -> bool:
+    """弹窗询问用户是否立即重启 Antigravity 以恢复中文界面。"""
+    try:
+        msg = f"检测到 Antigravity 已更新到 {version}，官方更新覆盖了中文界面。是否立即重启以自动恢复中文？"
+        script = (
+            f'display dialog {json.dumps(msg)} '
+            'with title "汇芯 Antigravity 汉化守护" '
+            'buttons {"稍后（退出时自动恢复）", "立即重启恢复中文"} '
+            'default button "立即重启恢复中文" '
+            'giving up after 60'
+        )
+        res = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=65)
+        return res.returncode == 0 and "立即重启恢复中文" in (res.stdout or "")
+    except Exception:
+        return False
+
+
+def quit_app_and_wait(timeout_sec: float = 8.0) -> bool:
+    """温和退出 Antigravity 并等待进程结束。"""
+    try:
+        subprocess.run(
+            ["osascript", "-e", 'tell application "Antigravity" to quit'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except Exception:
+        pass
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        if not is_app_running():
+            return True
+        time.sleep(0.4)
+    return not is_app_running()
+
+
+def _auto_sync_locked() -> int:
+    if not APP.exists() or not (APP / "Contents" / "Info.plist").exists():
         return 0
     if is_localized():
         return 0
@@ -436,7 +620,14 @@ def auto_sync() -> int:
         return 0
 
     current = app_version()
-    if check(quiet=True) != 0:
+    if current == "unknown":
+        return 0
+    try:
+        supported = check(quiet=True) == 0
+    except Exception:
+        # 升级替换瞬间文件可能尚未就绪，留待下一次轮询处理
+        return 0
+    if not supported:
         state = load_guard_state()
         if state.get("incompatible_notified") != current:
             log_guard(f"检测到 Antigravity {current} 结构不兼容，已跳过自动汉化")
@@ -445,14 +636,25 @@ def auto_sync() -> int:
             save_guard_state(state)
         return 1
 
+    restarted_by_guard = False
     if is_app_running():
         state = load_guard_state()
-        if state.get("pending_notified") != current:
-            log_guard(f"检测到 Antigravity {current} 汉化已失效（升级覆盖），等待用户退出后自动恢复")
-            notify("汇芯 Antigravity 汉化守护", f"检测到已升级到 {current}，完全退出应用后将自动恢复中文界面。")
+        if state.get("prompted_version") != current:
+            log_guard(f"检测到 Antigravity {current} 汉化已失效（升级覆盖），弹窗询问是否立即重启恢复")
+            state["prompted_version"] = current
             state["pending_notified"] = current
             save_guard_state(state)
-        return 0
+            if prompt_restart_for_localization(current):
+                if quit_app_and_wait(timeout_sec=8.0):
+                    restarted_by_guard = True
+                else:
+                    log_guard(f"Antigravity {current} 未在 8 秒内退出，等待用户手动退出后自动恢复")
+                    notify("汇芯 Antigravity 汉化守护", "请先手动完全退出 Antigravity，退出后 5 秒内将自动恢复中文界面。")
+                    return 0
+            else:
+                return 0
+        else:
+            return 0
 
     try:
         code = install(force=False, quiet=True)
@@ -465,16 +667,37 @@ def auto_sync() -> int:
             save_guard_state(state)
         return 1
     if code == 0:
-        log_guard(f"已自动为 Antigravity {current} 重新注入中文界面")
-        notify("汇芯 Antigravity 汉化守护", f"Antigravity {current} 中文界面已自动同步完成。")
+        log_guard(f"已自动为 Antigravity {current} 重新注入中文界面" + ("并重启" if restarted_by_guard else ""))
         state = load_guard_state()
         state["last_synced_version"] = current
         state.pop("pending_notified", None)
         state.pop("permission_notified", None)
+        state.pop("prompted_version", None)
         save_guard_state(state)
+        if restarted_by_guard:
+            subprocess.Popen(["open", "-a", str(APP)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            notify("汇芯 Antigravity 汉化守护", f"Antigravity {current} 中文界面已自动同步完成。")
     else:
         log_guard(f"Antigravity {current} 自动汉化失败，退出码：{code}")
     return code
+
+
+def auto_sync() -> int:
+    """供 LaunchAgent 调用：检测到官方升级导致汉化丢失时自动重新注入。"""
+    SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+    with GUARD_LOCK.open("w", encoding="utf-8") as lock_handle:
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return 0
+        try:
+            return _auto_sync_locked()
+        finally:
+            try:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
 
 
 def ensure_guard_app() -> bool:
@@ -524,18 +747,31 @@ def ensure_guard_app() -> bool:
     return sign_res.returncode == 0
 
 
+def sync_support_assets() -> None:
+    """将 dicts/ 与 runtime/ 同步到 SUPPORT_DIR，供后台守护进程独立使用。"""
+    source_root = Path(__file__).resolve().parent
+    for folder in ("dicts", "runtime"):
+        src = source_root / folder
+        dst = SUPPORT_DIR / folder
+        if src.is_dir() and src.resolve() != dst.resolve():
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+
+
 def guard_enable() -> int:
     SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(Path(__file__).resolve(), GUARD_SCRIPT)
     GUARD_SCRIPT.chmod(0o755)
+    sync_support_assets()
     has_guard_app = ensure_guard_app()
     LAUNCH_AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
     program_args = [str(GUARD_BIN)] if has_guard_app and GUARD_BIN.exists() else [sys.executable, str(GUARD_SCRIPT), "auto-sync"]
     plist_data = {
         "Label": LAUNCH_AGENT_LABEL,
         "ProgramArguments": program_args,
-        "WatchPaths": [str(RESOURCES), str(APP / "Contents" / "Info.plist")],
-        "StartInterval": 15,
+        "WatchPaths": [str(APP), str(RESOURCES), str(APP / "Contents" / "Info.plist")],
+        "StartInterval": 5,
         "RunAtLoad": True,
         "StandardOutPath": str(GUARD_LOG),
         "StandardErrorPath": str(GUARD_LOG),
@@ -555,7 +791,7 @@ def guard_enable() -> int:
     if GUARD_APP.exists():
         print(f"授权应用壳：{GUARD_APP}")
         print("首次使用请在「系统设置 → 隐私与安全性 → App 管理」中添加并允许 HuixinZhGuard.app，之后永久自动生效。")
-    print("以后每次 Antigravity 升级，只要退出应用，15 秒内会自动同步中文界面。")
+    print("以后每次 Antigravity 升级，只要退出应用，5 秒内会自动同步中文界面（若升级后自动重启为英文，会弹窗一键重启恢复）。")
     auto_sync()
     return 0
 

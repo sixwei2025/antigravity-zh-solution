@@ -6,7 +6,7 @@
 
 ### 给 macOS Antigravity 加上一层自然、可回滚的中文界面适配
 
-![Version](https://img.shields.io/badge/version-v0.3.1-c8102e?style=flat-square)
+![Version](https://img.shields.io/badge/version-v0.4.0-c8102e?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS-111318?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-555555?style=flat-square)
 ![Tested](https://img.shields.io/badge/tested-Antigravity%202.33.0-2f855a?style=flat-square)
@@ -112,11 +112,14 @@ python3 antigravity_zh_switcher.py restore
 
 ```text
 antigravity-zh-solution/
-├── antigravity_zh_switcher.py      # 检查、安装、还原
+├── antigravity_zh_switcher.py         # 检查、安装、还原与升级守护
+├── dicts/                             # 5,200+ 界面词典与 huixin_polish.json 润色覆盖
+├── runtime/preload_runtime.js         # 精确查找与代码/对话隔离运行时
 ├── assets/showcase/hero-banner-v2.jpg # 汉化前后真实界面对比
 ├── assets/showcase/pipeline-architecture-v2.jpg
 ├── CHANGELOG.md
 ├── LICENSE
+├── NOTICE                             # 第三方开源组件署名（MIT）
 └── README.md
 ```
 
@@ -135,4 +138,4 @@ antigravity-zh-solution/
 
 ## 品牌与许可
 
-袁六伟 · 台州汇芯（公众号/视频号：袁六伟）。本项目采用 MIT License；基于公开社区项目获得版本线索与启发的部分，均保留原作者与许可边界，不把他人成果说成完全原创。
+袁六伟 · 台州汇芯（公众号/视频号：袁六伟）。本项目采用 MIT License；词典与 DOM 隔离运行时参考并整合了 MIT 开源项目 [qqxpee/antigravity2-cn](https://github.com/qqxpee/antigravity2-cn)（详见 [NOTICE](NOTICE)），保留原作者署名与许可边界。
